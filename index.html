@@ -1,0 +1,413 @@
+<html>
+    <script src='https://d3js.org/d3.v5.min.js'></script>
+    <style> 
+        circle {
+            fill: lightblue;
+            stroke: black;
+        } 
+        #tooltip {
+            opacity: 0;
+            position: absolute;
+            text-align: center;
+            width: 200px; height: 80px;
+            background: grey;
+            border: 0px;
+            z-index: 2;
+        }
+        #annotation {
+            opacity: 0;
+            position: absolute;
+            text-align: center;
+            width: 200px; height: 20px;
+            border: 0px;
+            z-index: 1;
+        }
+        #buttonWrapper {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+        }
+        #graphWrapper {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+        }
+        #graphWrapperX {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #yaxislabel {
+            display: flex;
+            transform: rotate(270deg);
+            margin: -50px;
+        }
+        #xaxislabel {
+            display: flex;
+            padding-bottom: 10px;
+        }
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+    </style>
+    <body onload='init()'>
+        <div id="graphWrapper">
+            <div id="yaxislabel">Average Highway MPG</div>
+            <div id="graphWrapperX">
+                <svg width=1000 height=1000></svg>
+                <div id="xaxislabel">Average City MPG</div>
+                <div id="buttonWrapper">
+                    <button onclick="back()">back</button>
+                    <button onclick="next()">next</button>
+                    <button onclick='linear()'>linear</button>
+                    <button onclick='log()'>log</button>
+                </div>
+            </div>
+        </div>
+
+        
+        <div id="tooltip"></div>
+        <div id="annotation"></div>
+        <script>
+            var cylinderThresholds = [12, 8, 6, 4, 3,  0, -1]
+            var annotations = [
+                "<div>Cars with 9-12 cylinders</div><div>Hover over each circle for more details.</div><div>Click where you predict Cars with 7-8 cylinders will be around.</div><div>Click next to see the result</div>",
+                "<div>Cars with 7-8 cylinders</div><div>Click to predict for Cars with 5-6 cylinders</div><div>Click next to see the result</div>",
+                "<div>Cars with 5-6 cylinders</div><div>Click to predict for Cars with 4 cylinders</div><div>Click next to see the result</div>",
+                "<div>Cars with 4 cylinders</div><div>Click to predict for Cars with 1-3 cylinders</div><div>Click next to see the result</div>",
+                "<div>Cars with 1-3 cylinders</div><div>Click to predict for Cars with 0 cylinders</div><div>Click next to see the result</div>",
+                "<div>Cars with 0 cylinders (Electric)</div>",
+                ""
+            ]
+            var thresholdIndex = 0;
+            var isLog = true;
+
+            function isInThresholdRange(d,i) {
+                return d.EngineCylinders <= cylinderThresholds[thresholdIndex]
+                && d.EngineCylinders > cylinderThresholds[thresholdIndex+1]
+            }
+
+            function indexUpdateBack() {
+                if (thresholdIndex > 0) {
+                    thresholdIndex -= 1;
+                }
+            }
+            function indexUpdateNext() {
+                if (thresholdIndex < cylinderThresholds.length - 1) {
+                    thresholdIndex += 1;
+                }
+            }
+            function getOpacity(d,i) {
+                if (thresholdIndex == cylinderThresholds.length - 1) {
+                    return 1
+                } else if (isInThresholdRange(d,i)) {
+                    return 1
+                } else if (d.EngineCylinders > cylinderThresholds[thresholdIndex]) {
+                    return .3
+                } else {
+                    return 0
+                }
+            }
+            function getFill(d,i) {
+                if (thresholdIndex == cylinderThresholds.length - 1) {
+                    return "lightblue"
+                } else if (isInThresholdRange(d,i)) {
+                    return "orange"
+                } else if (d.EngineCylinders > cylinderThresholds[thresholdIndex]) {
+                    return "lightblue"
+                } else {
+                    return "lightblue"
+                }
+            }
+            function getRadius(d,i) {
+                if (isInThresholdRange(d,i) || d.EngineCylinders >= cylinderThresholds[thresholdIndex]) {
+                    return Number(5) + Number(2) * Number(d.EngineCylinders)
+                }
+                return 0;
+            }
+            function averagePositionX(data) {
+                    var numcars = 0;
+                    var totalCityMPG = 0;
+                    for (let i = 0; i < data.length; i++) {
+                        if (data[i].EngineCylinders <= cylinderThresholds[thresholdIndex]
+                            && data[i].EngineCylinders > cylinderThresholds[thresholdIndex+1]) {
+                            numcars += 1;
+                            totalCityMPG += Number(data[i].AverageCityMPG);
+                        }
+                    }
+                    return totalCityMPG / numcars
+                }
+
+            function averagePositionY(data) {
+                var numcars = 0;
+                var totalHighwayMPG = 0;
+                for (let i = 0; i < data.length; i++) {
+                    if (data[i].EngineCylinders <= cylinderThresholds[thresholdIndex]
+                        && data[i].EngineCylinders > cylinderThresholds[thresholdIndex+1]) {
+                        numcars += 1;
+                        totalHighwayMPG += Number(data[i].AverageHighwayMPG);
+                    }
+                }
+                return totalHighwayMPG / numcars
+            }
+
+            async function init() {
+                const data = await d3.csv(
+                    'https://flunky.github.io/cars2017.csv'
+                );
+                console.log(data)
+                xdomain = [10, 150];
+                xrange = [0, 900];
+                ydomain = [10, 150];
+                yrange = [900, 0];
+
+                var x = d3.scaleLog().domain(xdomain).range(xrange);
+                var y = d3.scaleLog().domain(ydomain).range(yrange);
+
+                var tooltip = d3.select("#tooltip");
+                var svg = d3.select("svg")
+
+                var annotation = d3.select("#annotation")
+                annotation.html(annotations[thresholdIndex])
+                console.log(y(150-averagePositionY(data) + 10))
+                annotation.style("opacity", 1)
+                          .style("left", x(averagePositionX(data)) + svg.node().getBoundingClientRect().x + 50 - 100)
+                          .style("top",  y(averagePositionY(data)) + svg.node().getBoundingClientRect().y + 50 - 40 + 150)
+
+                
+
+                svg.on("click", function() {
+                    svg.select("#prediction").remove();
+                    svg.append('circle')
+                       .attr("id", "prediction")
+                       .attr('cx', d3.event.pageX - svg.node().getBoundingClientRect().x)
+                       .attr('cy', d3.event.pageY - svg.node().getBoundingClientRect().y)
+                       .attr('r', 20)
+                       .attr('opacity', 1)
+                       .style("fill", "red")
+
+                })
+
+                svg.append("g")
+                    .attr("transform", "translate(50,50)")
+                    .selectAll('circle')
+                    .data(data)
+                    .enter()
+                    .append('circle')
+                    .attr('cx', function(d,i){ return x(d.AverageCityMPG) })
+                    .attr('cy', function(d,i){ return y(d.AverageHighwayMPG) })
+                    .attr('r', getRadius)
+                    .attr('opacity', getOpacity)
+                    .style("fill", getFill)
+                    .on("mouseover", function(d,i) {
+                        tooltip.style("opacity", 1)
+                               .style("left", (d3.event.pageX)+"px")
+                               .style("top", (d3.event.pageY) +"px")
+                               .html("<div>Car #" + i + "</div>" + 
+                                     "<div>" + d.EngineCylinders + " Cylinders</div>" +
+                                     "<div>AverageCityMPG: " + d.AverageCityMPG + "</div>" + 
+                                     "<div>AverageHighwayMPG: " + d.AverageHighwayMPG + "</div>"
+                                     )
+                               
+                    })
+                    .on("mouseout", function() { tooltip.style("opacity", 0) })
+
+                svg.append('g')
+                    .attr("id", "yaxis")
+                    .attr("transform", "translate(50,50)")
+                   .call(d3.axisLeft(y).tickValues([10, 20, 50, 100]).tickFormat(d3.format("~s")));
+
+                svg.append("g")
+                   .attr("id", "xaxis")
+                   .attr("transform", "translate(50,950)")
+                   .call(d3.axisBottom(x).tickValues([10, 20, 50, 100]).tickFormat(d3.format("~s")));
+
+            }
+            async function linear() {
+                const data = await d3.csv(
+                    'https://flunky.github.io/cars2017.csv'
+                );
+                isLog = false;
+                xdomain = [10, 150];
+                xrange = [0, 900];
+                ydomain = [10, 150];
+                yrange = [900, 0];
+
+                var x = d3.scaleLinear().domain(xdomain).range(xrange);
+                var y = d3.scaleLinear().domain(ydomain).range(yrange);
+
+
+                var svg = d3.select("svg")
+                    
+                svg.select('g').selectAll('circle')
+                    .data(data)
+                    .transition().duration(2000).delay(100)
+                    .attr('cx', function(d,i){ return x(d.AverageCityMPG) })
+                    .attr('cy', function(d,i){ return y(d.AverageHighwayMPG) })
+                    .attr('r', getRadius)
+                
+                svg.select("#yaxis").remove()
+                svg.select("#xaxis").remove()
+
+                svg.append('g')
+                   .attr("transform", "translate(50,50)")
+                   .attr("id", "yaxis")
+                   .call(d3.axisLeft(y).tickValues([10, 30, 50, 70, 90, 110, 130]).tickFormat(d3.format("~s")));
+
+                svg.append('g')
+                   .attr("transform", "translate(50,950)")
+                   .attr("id", "xaxis")
+                   .call(d3.axisBottom(x).tickValues([10, 30, 50, 70, 90, 110, 130]).tickFormat(d3.format("~s")));
+            }
+            async function log() {
+                const data = await d3.csv(
+                    'https://flunky.github.io/cars2017.csv'
+                );
+                isLog = true;
+                xdomain = [10, 150];
+                xrange = [0, 900];
+                ydomain = [10, 150];
+                yrange = [900, 0];
+
+                var x = d3.scaleLog().domain(xdomain).range(xrange);
+                var y = d3.scaleLog().domain(ydomain).range(yrange);
+
+
+                var svg = d3.select("svg")
+                    
+                svg.select('g').selectAll('circle')
+                    .data(data)
+                    .transition().duration(2000).delay(100)
+                    .attr('cx', function(d,i){ return x(d.AverageCityMPG) })
+                    .attr('cy', function(d,i){ return y(d.AverageHighwayMPG) })
+                    .attr('r', getRadius)
+                
+                svg.select("#yaxis").remove()
+                svg.select("#xaxis").remove()
+
+                svg.append('g')
+                   .attr("transform", "translate(50,50)")
+                   .attr("id", "yaxis")
+                   .call(d3.axisLeft(y).tickValues([10, 20, 50, 100]).tickFormat(d3.format("~s")));
+
+                svg.append('g')
+                   .attr("transform", "translate(50,950)")
+                   .attr("id", "xaxis")
+                   .call(d3.axisBottom(x).tickValues([10, 20, 50, 100]).tickFormat(d3.format("~s")));
+            }
+            async function back() {
+                const data = await d3.csv(
+                    'https://flunky.github.io/cars2017.csv'
+                );
+                
+                indexUpdateBack();
+                xdomain = [10, 150];
+                xrange = [0, 900];
+                ydomain = [10, 150];
+                yrange = [900, 0];
+                var x;
+                var y;
+                if (isLog) {
+                    x = d3.scaleLog().domain(xdomain).range(xrange);
+                    y = d3.scaleLog().domain(ydomain).range(yrange);
+                } else {
+                    x = d3.scaleLinear().domain(xdomain).range(xrange);
+                    y = d3.scaleLinear().domain(ydomain).range(yrange);
+                }
+
+                var svg = d3.select("svg")
+                    
+                var annotation = d3.select("#annotation")
+                annotation.html(annotations[thresholdIndex])
+                annotation.style("opacity", 1)
+                          .style("left", x(averagePositionX(data)) + svg.node().getBoundingClientRect().x + 50 - 100)
+                          .style("top",  y(averagePositionY(data)) + svg.node().getBoundingClientRect().y + 50 - 40 + 150)
+
+                svg.select('g').selectAll('circle')
+                    .data(data)
+                    .transition().duration(1000).delay(10)
+                    .attr('opacity', getOpacity)
+                    .attr('r', getRadius)
+                    .style("fill", getFill)
+            }
+            async function next() {
+                const data = await d3.csv(
+                    'https://flunky.github.io/cars2017.csv'
+                );
+                
+                indexUpdateNext();
+                xdomain = [10, 150];
+                xrange = [0, 900];
+                ydomain = [10, 150];
+                yrange = [900, 0];
+                var x;
+                var y;
+                if (isLog) {
+                    x = d3.scaleLog().domain(xdomain).range(xrange);
+                    y = d3.scaleLog().domain(ydomain).range(yrange);
+                } else {
+                    x = d3.scaleLinear().domain(xdomain).range(xrange);
+                    y = d3.scaleLinear().domain(ydomain).range(yrange);
+                }
+
+                
+
+                var svg = d3.select("svg")
+
+                var annotation = d3.select("#annotation")
+                annotation.html(annotations[thresholdIndex])
+                console.log(y(150-averagePositionY(data) + 10))
+                annotation.style("opacity", 1)
+                          .style("left", x(averagePositionX(data)) + svg.node().getBoundingClientRect().x + 50 - 100)
+                          .style("top",  y(averagePositionY(data)) + svg.node().getBoundingClientRect().y + 50 - 40 + 150)
+
+                function getAveragePositionX(d,i) {
+                    if (d.EngineCylinders <= cylinderThresholds[thresholdIndex]
+                            && d.EngineCylinders > cylinderThresholds[thresholdIndex+1]) {
+                        return x(averagePositionX(data))
+                    }
+                    return x(d.AverageCityMPG)
+                }
+                function getAveragePositionY(d,i) {
+                    if (d.EngineCylinders <= cylinderThresholds[thresholdIndex]
+                            && d.EngineCylinders > cylinderThresholds[thresholdIndex+1]) {
+                            return y(averagePositionY(data))
+                    }
+                    return y(d.AverageHighwayMPG)
+                }
+                function getStartPositionX(d,i) {
+                    if (d.EngineCylinders <= cylinderThresholds[thresholdIndex]
+                            && d.EngineCylinders > cylinderThresholds[thresholdIndex+1]) {
+                        return x(10);
+                    }
+                    return x(d.AverageCityMPG);
+                }
+                function getStartPositionY(d,i) {
+                    if (d.EngineCylinders <= cylinderThresholds[thresholdIndex]
+                            && d.EngineCylinders > cylinderThresholds[thresholdIndex+1]) {
+                        return y(10);
+                    }
+                    return y(d.AverageHighwayMPG);
+                }
+
+                    
+                svg.select('g').selectAll('circle')
+                    .data(data)
+                    .attr("cx", getStartPositionX)
+                    .attr("cy", getStartPositionY)
+                    .attr('r', getRadius)
+                    .transition().duration(1000)
+                    .attr("cx", getAveragePositionX)
+                    .attr("cy", getAveragePositionY)
+                    .attr('opacity', getOpacity)
+                    .style("fill", getFill)
+                    .transition().duration(1000).delay(450)
+                    .attr("cx", function(d,i) { return x(d.AverageCityMPG) })
+                    .attr("cy", function(d,i) { return y(d.AverageHighwayMPG) })
+            }
+        </script>
+    </body>
+</html>
